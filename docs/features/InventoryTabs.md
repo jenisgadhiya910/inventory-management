@@ -2,115 +2,226 @@
 
 ## What It Does
 
-Tabs let you switch between four main sections of the inventory system. Each tab shows different data and serves a different purpose.
+Navigation tabs let users switch between the main sections of the inventory system. Each section is a separate route (not a tab component) for deep linking and browser history support.
+
+> **Implementation note:** Navigation is handled by `react-router-dom` `NavLink` components in `AppLayout`, NOT by shadcn `Tabs` component. Each "tab" is a route. See [ARCHITECTURE.md](../ARCHITECTURE.md) for AppLayout and routing details.
 
 ---
 
-## The Four Tabs
+## Component Architecture
 
-### Products Tab (Default)
-- The main product listing table with search, sort, and filter
-- Where you manage all your inventory items
-- See the ProductTable document for full details
+```
+# Tabs are implemented via react-router-dom routes, not shadcn Tabs component.
+# Each tab is a separate route, with shared layout.
 
-### Categories Tab
-- Browse and manage product categories
-- Products are grouped under their categories using expandable sections
-- See the CategoryAccordion document for full details
+app/routes.tsx                    # Route definitions
+components/shared/
+├── AppLayout.tsx                 # Sidebar nav + main content area
+├── TabNavigation.tsx             # Tab bar component with badges
+└── TabLink.tsx                   # Single tab link with icon, label, badge
 
-### Suppliers Tab
-- View and manage all your suppliers
-- See supplier details, ratings, and which products they supply
+features/products/                # /products route
+features/categories/              # /categories route
+features/suppliers/               # /suppliers route
+features/alerts/                  # /alerts route
+```
 
-### Alerts Tab
-- View all stock-related notifications and warnings
-- See the StockAlerts document for full details
+### Why Routes Instead of Tabs Component
 
----
-
-## Products Tab Details
-
-- Shows the full product data table
-- Quick access to "Add Product" button
-- Filter and search tools are always visible
-- Product count is shown in a badge next to the tab label
+- Deep linking: users can bookmark `/alerts` directly
+- Browser back/forward navigation works
+- Each tab's state is isolated in its own route component
+- URL reflects current view for shareability
 
 ---
 
-## Categories Tab Details
+## Component Hierarchy
 
-### Category List
-- Each category shows its name, description, color, and product count
-- Categories can be expanded to see all products within them
-- Supports parent/child category relationships (subcategories)
-
-### Category Management
-- **Add Category** button at the top
-- Each category has options to: Edit, Add Subcategory, Delete
-- Deleting a category asks for confirmation and requires you to reassign its products first
-- Drag to reorder categories (or use the sort dropdown)
-
----
-
-## Suppliers Tab Details
-
-### Supplier List
-- Displayed as a table with columns:
-  - Supplier name and company
-  - Contact info (email, phone)
-  - Lead time (how many days deliveries take)
-  - Rating (shown as stars)
-  - Number of products supplied
-  - Active/Inactive status
-- Click a supplier name to view full details
-
-### Supplier Management
-- **Add Supplier** button at the top
-- Each supplier has options to: Edit, Deactivate, Delete
-- Deleting a supplier asks for confirmation
-- Filter by active/inactive status
+```
+<AppLayout>
+  <Sidebar>
+    <TabNavigation>
+      <TabLink to="/products" icon={Package} label="Products" badge={productCount} />
+      <TabLink to="/categories" icon={FolderTree} label="Categories" badge={categoryCount} />
+      <TabLink to="/suppliers" icon={Truck} label="Suppliers" badge={activeSupplierCount} />
+      <TabLink to="/alerts" icon={Bell} label="Alerts" badge={unreadAlertCount} badgeVariant="critical" />
+    </TabNavigation>
+  </Sidebar>
+  <main>
+    <Outlet />   {/* Renders the matched route component */}
+  </main>
+</AppLayout>
+```
 
 ---
 
-## Alerts Tab Details
+## Tab Definitions
 
-- Displays all stock alerts sorted by severity (critical first)
-- Each alert shows:
-  - Alert type icon and color
-  - Product name
-  - Alert message (e.g., "Widget X is below minimum stock level")
-  - When the alert was created
-  - Mark as Read / Dismiss buttons
-- Filter alerts by: type, severity, read/unread status
-- "Mark All as Read" and "Dismiss All" buttons at the top
-- Alert count badge on the tab shows unread alerts
+### TabLink Props
+
+```typescript
+interface TabLinkProps {
+  to: string;
+  icon: LucideIcon;
+  label: string;
+  badge?: number;
+  badgeVariant?: 'default' | 'critical';  // critical = red background
+}
+```
+
+### The Four Tabs
+
+| Tab | Route | Icon | Badge Value | Badge Variant |
+|-----|-------|------|-------------|---------------|
+| Products | `/products` | `Package` | `products.length` | default |
+| Categories | `/categories` | `FolderTree` | `categories.length` | default |
+| Suppliers | `/suppliers` | `Truck` | `suppliers.filter(s => s.isActive).length` | default |
+| Alerts | `/alerts` | `Bell` | `alerts.filter(a => !a.isRead && !a.isDismissed).length` | critical (if any unread) |
+
+---
+
+## Products Tab (`/products`)
+
+- Renders `<ProductListing>` component
+- Contains: `ProductTableToolbar`, `ProductTable`, `ProductPagination`
+- "Add Product" button in top-right -> navigates to `/products/new`
+- See [ProductTable.md](ProductTable.md) for full details
+- Filter/search state managed by `useProductFilters` hook (local to this route)
+
+---
+
+## Categories Tab (`/categories`)
+
+- Renders `<CategoryManagement>` component
+- Contains: search bar, sort dropdown, `CategoryAccordion`
+- "Add Category" button in top-right -> opens category creation dialog
+- See [CategoryAccordion.md](CategoryAccordion.md) for full details
+
+### Category Management Features
+
+- Add/edit/delete categories via dialogs
+- Subcategory support (parent/child)
+- Drag to reorder (or sort dropdown)
+- Deleting requires product reassignment
+
+---
+
+## Suppliers Tab (`/suppliers`)
+
+- Renders `<SupplierManagement>` component
+
+### Supplier Table Columns
+
+| Column | Field | Sortable | Notes |
+|--------|-------|----------|-------|
+| Supplier Name | `name` | Yes | Click -> supplier detail |
+| Company | `company` | Yes | |
+| Email | `email` | No | `mailto:` link |
+| Phone | `phone` | No | `tel:` link |
+| Lead Time | `leadTimeDays` | Yes | "{n} days" format |
+| Rating | `rating` | Yes | Star display (1-5) |
+| Products | `productsSupplied.length` | Yes | Count badge |
+| Status | `isActive` | Yes | Toggle switch |
+
+### Supplier Actions
+
+> **Note:** Supplier detail is a **Dialog overlay** (not a separate `/suppliers/:id` route). Clicking a supplier name opens a detail dialog. All supplier management happens via dialogs on the `/suppliers` route.
+
+| Action | Behavior |
+|--------|----------|
+| View Supplier | Click supplier name -> opens SupplierDetailDialog (read-only) |
+| Add Supplier | "Add Supplier" button -> opens SupplierFormDialog |
+| Edit | Three-dot menu or detail dialog "Edit" button -> opens SupplierFormDialog pre-filled |
+| Deactivate | Toggle `isActive` to false (see [StockToggles.md](StockToggles.md)), hides from product form dropdowns |
+| Delete | Confirmation dialog. **Blocked** if products reference this supplier — show count and "Reassign products first". |
+
+### Supplier Form Fields
+
+```typescript
+// Zod schema
+const supplierSchema = z.object({
+  name: z.string().min(2, 'Supplier name is required'),
+  email: z.string().email('Invalid email address'),
+  phone: z.string().min(5, 'Phone number is required'),
+  company: z.string().min(2, 'Company name is required'),
+  address: z.string().optional().default(''),
+  leadTimeDays: z.number().min(1, 'Lead time must be at least 1 day'),
+  rating: z.number().min(1).max(5).default(3),
+  isActive: z.boolean().default(true),
+});
+```
+
+---
+
+## Alerts Tab (`/alerts`)
+
+- Renders `<AlertsPage>` component
+- Sorted by severity: critical first, then warning, then info
+- See [StockAlerts.md](StockAlerts.md) for full details
+
+### Alert List Features
+
+- Filter by type, severity, read/unread status
+- "Mark All as Read" and "Dismiss All" bulk actions
+- Individual alert actions: Restock, Mark as Read, Dismiss
+- Click product name -> navigate to product detail
 
 ---
 
 ## Tab Behavior
 
-- The active tab is reflected in the page URL, so you can bookmark or share a specific section
-- Your last active tab is remembered when you return
-- Each tab maintains its own filter and search state independently
-- Use arrow keys to navigate between tabs when focused on the tab bar
-
----
-
-## Badge Counts on Tabs
-
-Each tab shows a small count badge:
-
-- **Products** — Total number of products
-- **Categories** — Total number of categories
-- **Suppliers** — Total number of active suppliers
-- **Alerts** — Number of unread alerts (highlighted in red if any are critical)
+| Behavior | Implementation |
+|----------|---------------|
+| Active tab highlighted | `NavLink` with `className` callback checking `isActive` |
+| URL reflects active tab | Direct route mapping (`/products`, `/categories`, etc.) |
+| Last tab remembered | On navigate, save current path to `stockbase_settings.lastTab`. On app open at `/`, redirect to `lastTab` if set. **URL always takes precedence** — direct URL access (e.g., `/alerts`) overrides `lastTab`. |
+| Independent filter state | Each route component manages its own filter state via hooks (resets on unmount) |
+| Keyboard navigation | Arrow keys navigate between tab links when tab bar is focused |
+| Badge updates in real-time | Badges read from context, re-render on state change |
 
 ---
 
 ## Responsive Behavior
 
-| Screen Size | What happens |
+| Screen Size | Layout |
 |---|---|
-| Desktop | Full tab bar with icons and labels |
-| Tablet | Icons and labels, slightly smaller |
-| Mobile | Icons only (labels hidden to save space) |
+| Desktop (`lg:`) | Sidebar with icons + labels, main content area |
+| Tablet (`md:`) | Sidebar with icons + labels, slightly narrower |
+| Mobile (default) | Bottom tab bar with icons only (labels hidden) |
+
+```typescript
+// Mobile: bottom tab bar
+<nav className="fixed bottom-0 left-0 right-0 flex justify-around border-t bg-background p-2 md:hidden">
+  {tabs.map(tab => <TabLink key={tab.to} {...tab} showLabel={false} />)}
+</nav>
+
+// Desktop: sidebar
+<aside className="hidden md:flex md:w-64 md:flex-col md:border-r">
+  {tabs.map(tab => <TabLink key={tab.to} {...tab} showLabel={true} />)}
+</aside>
+```
+
+---
+
+## Edge Cases
+
+| Scenario | Behavior |
+|----------|----------|
+| Direct URL access to `/alerts` | Renders alerts tab directly, no redirect needed |
+| Tab badge shows 0 | Badge hidden when count is 0 |
+| Unknown route (e.g., `/foo`) | Redirect to `/` (dashboard) |
+| Rapid tab switching | Route components unmount/mount; filter state resets per design |
+
+---
+
+## Test Scenarios
+
+| Test | Type |
+|------|------|
+| All 4 tabs render and navigate correctly | E2E |
+| Tab badges show correct counts | Component |
+| Active tab is highlighted based on URL | Component |
+| Mobile renders bottom tab bar, desktop renders sidebar | Component |
+| Alert badge turns red when critical alerts exist | Component |
+| Keyboard arrow navigation between tabs | Component |
+| Direct URL access renders correct tab content | E2E |
